@@ -1,6 +1,166 @@
+(function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isAnyArray = void 0;
+const toString = Object.prototype.toString;
+/**
+ * Checks if an object is an instance of an Array (array or typed array).
+ *
+ * @param {any} value - Object to check.
+ * @returns {boolean} True if the object is an array.
+ */
+function isAnyArray(value) {
+    return toString.call(value).endsWith('Array]');
+}
+exports.isAnyArray = isAnyArray;
+
+},{}],2:[function(require,module,exports){
 'use strict';
 
-//Object.defineProperty(exports, '__esModule', { value: true });
+var isAnyArray = require('is-any-array');
+
+function max(input, options = {}) {
+  if (!isAnyArray.isAnyArray(input)) {
+    throw new TypeError('input must be an array');
+  }
+
+  if (input.length === 0) {
+    throw new TypeError('input must not be empty');
+  }
+
+  const { fromIndex = 0, toIndex = input.length } = options;
+
+  if (
+    fromIndex < 0 ||
+    fromIndex >= input.length ||
+    !Number.isInteger(fromIndex)
+  ) {
+    throw new Error('fromIndex must be a positive integer smaller than length');
+  }
+
+  if (
+    toIndex <= fromIndex ||
+    toIndex > input.length ||
+    !Number.isInteger(toIndex)
+  ) {
+    throw new Error(
+      'toIndex must be an integer greater than fromIndex and at most equal to length',
+    );
+  }
+
+  let maxValue = input[fromIndex];
+  for (let i = fromIndex + 1; i < toIndex; i++) {
+    if (input[i] > maxValue) maxValue = input[i];
+  }
+  return maxValue;
+}
+
+module.exports = max;
+
+},{"is-any-array":1}],3:[function(require,module,exports){
+'use strict';
+
+var isAnyArray = require('is-any-array');
+
+function min(input, options = {}) {
+  if (!isAnyArray.isAnyArray(input)) {
+    throw new TypeError('input must be an array');
+  }
+
+  if (input.length === 0) {
+    throw new TypeError('input must not be empty');
+  }
+
+  const { fromIndex = 0, toIndex = input.length } = options;
+
+  if (
+    fromIndex < 0 ||
+    fromIndex >= input.length ||
+    !Number.isInteger(fromIndex)
+  ) {
+    throw new Error('fromIndex must be a positive integer smaller than length');
+  }
+
+  if (
+    toIndex <= fromIndex ||
+    toIndex > input.length ||
+    !Number.isInteger(toIndex)
+  ) {
+    throw new Error(
+      'toIndex must be an integer greater than fromIndex and at most equal to length',
+    );
+  }
+
+  let minValue = input[fromIndex];
+  for (let i = fromIndex + 1; i < toIndex; i++) {
+    if (input[i] < minValue) minValue = input[i];
+  }
+  return minValue;
+}
+
+module.exports = min;
+
+},{"is-any-array":1}],4:[function(require,module,exports){
+'use strict';
+
+var isAnyArray = require('is-any-array');
+var max = require('ml-array-max');
+var min = require('ml-array-min');
+
+function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
+
+var max__default = /*#__PURE__*/_interopDefaultLegacy(max);
+var min__default = /*#__PURE__*/_interopDefaultLegacy(min);
+
+function rescale(input, options = {}) {
+  if (!isAnyArray.isAnyArray(input)) {
+    throw new TypeError('input must be an array');
+  } else if (input.length === 0) {
+    throw new TypeError('input must not be empty');
+  }
+
+  let output;
+  if (options.output !== undefined) {
+    if (!isAnyArray.isAnyArray(options.output)) {
+      throw new TypeError('output option must be an array if specified');
+    }
+    output = options.output;
+  } else {
+    output = new Array(input.length);
+  }
+
+  const currentMin = min__default['default'](input);
+  const currentMax = max__default['default'](input);
+
+  if (currentMin === currentMax) {
+    throw new RangeError(
+      'minimum and maximum input values are equal. Cannot rescale a constant array',
+    );
+  }
+
+  const {
+    min: minValue = options.autoMinMax ? currentMin : 0,
+    max: maxValue = options.autoMinMax ? currentMax : 1,
+  } = options;
+
+  if (minValue >= maxValue) {
+    throw new RangeError('min option must be smaller than max option');
+  }
+
+  const factor = (maxValue - minValue) / (currentMax - currentMin);
+  for (let i = 0; i < input.length; i++) {
+    output[i] = (input[i] - currentMin) * factor + minValue;
+  }
+
+  return output;
+}
+
+module.exports = rescale;
+
+},{"is-any-array":1,"ml-array-max":2,"ml-array-min":3}],5:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, '__esModule', { value: true });
 
 var isAnyArray = require('is-any-array');
 var rescale = require('ml-array-rescale');
@@ -5113,38 +5273,39 @@ class nipals {
   }
 }
 
-var mlMatrix = {};
-mlMatrix.AbstractMatrix = AbstractMatrix;
-mlMatrix.CHO = CholeskyDecomposition;
-mlMatrix.CholeskyDecomposition = CholeskyDecomposition;
-mlMatrix.EVD = EigenvalueDecomposition;
-mlMatrix.EigenvalueDecomposition = EigenvalueDecomposition;
-mlMatrix.LU = LuDecomposition;
-mlMatrix.LuDecomposition = LuDecomposition;
-mlMatrix.Matrix = Matrix;
-mlMatrix.MatrixColumnSelectionView = MatrixColumnSelectionView;
-mlMatrix.MatrixColumnView = MatrixColumnView;
-mlMatrix.MatrixFlipColumnView = MatrixFlipColumnView;
-mlMatrix.MatrixFlipRowView = MatrixFlipRowView;
-mlMatrix.MatrixRowSelectionView = MatrixRowSelectionView;
-mlMatrix.MatrixRowView = MatrixRowView;
-mlMatrix.MatrixSelectionView = MatrixSelectionView;
-mlMatrix.MatrixSubView = MatrixSubView;
-mlMatrix.MatrixTransposeView = MatrixTransposeView;
-mlMatrix.NIPALS = nipals;
-mlMatrix.Nipals = nipals;
-mlMatrix.QR = QrDecomposition;
-mlMatrix.QrDecomposition = QrDecomposition;
-mlMatrix.SVD = SingularValueDecomposition;
-mlMatrix.SingularValueDecomposition = SingularValueDecomposition;
-mlMatrix.WrapperMatrix1D = WrapperMatrix1D;
-mlMatrix.WrapperMatrix2D = WrapperMatrix2D;
-mlMatrix.correlation = correlation;
-mlMatrix.covariance = covariance;
-mlMatrix["default"] = Matrix;
-mlMatrix.determinant = determinant;
-mlMatrix.inverse = inverse;
-mlMatrix.linearDependencies = linearDependencies;
-mlMatrix.pseudoInverse = pseudoInverse;
-mlMatrix.solve = solve;
-mlMatrix.wrap = wrap;
+exports.AbstractMatrix = AbstractMatrix;
+exports.CHO = CholeskyDecomposition;
+exports.CholeskyDecomposition = CholeskyDecomposition;
+exports.EVD = EigenvalueDecomposition;
+exports.EigenvalueDecomposition = EigenvalueDecomposition;
+exports.LU = LuDecomposition;
+exports.LuDecomposition = LuDecomposition;
+exports.Matrix = Matrix;
+exports.MatrixColumnSelectionView = MatrixColumnSelectionView;
+exports.MatrixColumnView = MatrixColumnView;
+exports.MatrixFlipColumnView = MatrixFlipColumnView;
+exports.MatrixFlipRowView = MatrixFlipRowView;
+exports.MatrixRowSelectionView = MatrixRowSelectionView;
+exports.MatrixRowView = MatrixRowView;
+exports.MatrixSelectionView = MatrixSelectionView;
+exports.MatrixSubView = MatrixSubView;
+exports.MatrixTransposeView = MatrixTransposeView;
+exports.NIPALS = nipals;
+exports.Nipals = nipals;
+exports.QR = QrDecomposition;
+exports.QrDecomposition = QrDecomposition;
+exports.SVD = SingularValueDecomposition;
+exports.SingularValueDecomposition = SingularValueDecomposition;
+exports.WrapperMatrix1D = WrapperMatrix1D;
+exports.WrapperMatrix2D = WrapperMatrix2D;
+exports.correlation = correlation;
+exports.covariance = covariance;
+exports["default"] = Matrix;
+exports.determinant = determinant;
+exports.inverse = inverse;
+exports.linearDependencies = linearDependencies;
+exports.pseudoInverse = pseudoInverse;
+exports.solve = solve;
+exports.wrap = wrap;
+window["mlMatrix"] = exports;
+},{"is-any-array":1,"ml-array-rescale":4}]},{},[5]);

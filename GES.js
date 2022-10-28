@@ -209,6 +209,7 @@ class PDAG {
 
 
 var math = window["math"];
+var mlMatrix = window["mlMatrix"];
 
 class Model{
 
@@ -229,7 +230,6 @@ class Model{
       if(isCategorical[columns[k]]){
         this.nCat++;
         const encoding = [...new Set(data.map(vec=>vec[k]))];
-        console.log(encoding);
         const inv = Object.fromEntries(encoding.map((x,i)=>[x,i]));
         this.catEncodings[k] = encoding;
         this.nCategories[k] = encoding.length;
@@ -242,8 +242,6 @@ class Model{
     this.dataWithNans = data;
     this.data = data.filter(l=>d3.every(l, x=>Number.isFinite(x)));
     this.N = data.length;
-    console.log(this.dataWithNans);
-    console.log(this.data);
   }
 
   statefulGES(){
@@ -268,7 +266,7 @@ class Model{
         while(true){
           state.stepEnd = false;
           let nextUpdate = null;
-          let nextDelta = 0;
+          let nextDelta = -(1<<49);
           for(let update of P.iterNeighbors(phase)){
             let [y, DagPaAfter, DagPaBefore] = update;
             const delta = this.localScore(y, DagPaAfter) - this.localScore(y, DagPaBefore);
@@ -316,7 +314,6 @@ class Model{
   localScore(y, DagPa){
     const {data:fullData, N, nCategories:fullNCategories} = this;
 
-    console.log(fullData);
     const {data, nCat, nColumns, nCategories} = (()=>{
       // Filter relevant columns
       let columns = [y, ...DagPa];
@@ -349,32 +346,46 @@ class Model{
     let nIters = 30;
     while(nIters-- > 0){
       // Estimate the embeddings using continuous data
-      let sigma12 = math.matrix(d3.range(0, nEmb).map(a=>d3.range(nEmb, n).map(b=>sigma[a][b])));
-      let sigma22 = math.matrix(d3.range(nEmb, n).map(a=>d3.range(nEmb, n).map(b=>sigma[a][b])));
-      let auxMatrix = math.multiply(sigma12, math.inv(sigma22));
-      
+      let sigma12 = new mlMatrix.Matrix(d3.range(0, nEmb).map(a=>d3.range(nEmb, n).map(b=>sigma[a][b])));
+      let sigma22 = new mlMatrix.Matrix(d3.range(nEmb, n).map(a=>d3.range(nEmb, n).map(b=>sigma[a][b])));
+      let auxMatrix = sigma12.mmul(mlMatrix.pseudoInverse(sigma22));      
 
       let muEm = d3.range(N).map(i=>{
-        const dataCont = data[i].slice(nEmb, n);
-        return math.add(
-          mu.slice(0, nEmb),
-          math.multiply(auxMatrix, math.subtract(dataCont, mu.slice(nEmb, n))),
-        );
+        const dataCont = mlMatrix.Matrix.columnVector(data[i].slice(nEmb, n));
+        const muCont = mlMatrix.Matrix.columnVector(mu.slice(nEmb, n));
+        return mlMatrix.Matrix.add(
+          mlMatrix.Matrix.columnVector(mu.slice(0, nEmb)),
+          auxMatrix.mmul(mlMatrix.Matrix.sub(dataCont, muCont)),
+        ).data[0];
       });
+
       const softMax = (vec)=> {
-        const pow = vec.map(x=>math.exp(x));
+        const pow = vec.map(x=>Math.exp(x));
         const sum = d3.sum(pow)
         return pow.map(x=>x/sum);
       }
       // Update the model connecting embedding with categorical data
-      weights = d3.mean(d3.transpose(d3.range(N).map(i=>softMax(d3.range(nCat).map(k=>-math.square(math.subtract(muEm[i], centroids[k][data[i][k]])))))));
+      weights = (()=>{
+        let z = d3.range(N).map(i=>d3.range(nCat).map(k=>{
+          const out = utils.zeros(nEmb);
+          for(let j=0;j<nEmb;j++) out[j] = muEm[i][j];
+          for(let j=0;j<nEmb;j++) out[j] -= centroids[k][data[i][k]][j];
+          for(let j=0;j<nEmb;j++) out[j] = -(out[j] * out[j]);
+          return out;
+        }));
+        z = z.map(v=>softMax(v));
+        z = d3.transpose(z);
+        z = z.map(arr=>d3.mean(arr));
+        return z;
+      })();
+      
       centroids = d3.range(nCat).map(k=>{
-        const centroids = utils.zeros(nCategories[k], nEmb);
-        for(let i=0; i<N; i++) for(let j=0; j<nEmb; j++) centroids[data[i][k]][j]+=nEmb[j];
+        const kCentroids = utils.zeros(nCategories[k], nEmb);
+        for(let i=0; i<N; i++) for(let j=0; j<nEmb; j++) kCentroids[data[i][k]][j] += muEm[i][j];
         const sum = utils.zeros(nCategories[k], nEmb);
         for(let i=0; i<N; i++) for(let j=0; j<nEmb; j++) sum[data[i][k]][j]++;
-        for(let A=0; A<nCategories[k]; A++) for(let j=0; j<nEmb; j++) centroids[A][j]/=sum[A][j];
-        return centroids;
+        for(let A=0; A<nCategories[k]; A++) for(let j=0; j<nEmb; j++) kCentroids[A][j]/=sum[A][j];
+        return kCentroids;
       });
 
       // Estimate the embeddings using discrete data
@@ -397,14 +408,17 @@ class Model{
     }
 
     // Compute the log-likelihood
-    const x_minus_mu = math.matrix(d3.range(N).map(i=>{
-      let x = [...data[i]]
-      for(let j=0; j<nEmb; j++) x[j] = centroids[j][x[j]];
+    const x_minus_mu = new mlMatrix.Matrix(d3.range(N).map(i=>{
+      let x = utils.zeros(n);
+      for(let k=0; k<nCat; k++){
+        for(let j=0; j<nEmb; j++) x[j] += weights[k] * centroids[k][data[i][j]]; 
+      }
+      for(let j=nCat; j<n; j++) x[j] = data[i][j+nCat];
       for(let j=0; j<n; j++) x[j] -= mu[j];
-      return [x];
+      return x;
     }));
     let logLikelihood = -0.5*math.log(2*math.pi*N); // unnecessary constant, but clear 
-    logLikelihood += -0.5*math.multiply(math.multiply(x_minus_mu, sigma), math.transpose(x_minus_mu));
+    logLikelihood += -0.5*x_minus_mu.mmul(new mlMatrix.Matrix(sigma)).mmul(x_minus_mu.transpose());
     let nParams = n/*mu*/ + n*n /*sigma*/ + /*weights*/ nCat + /*centroids*/ nCatOfCat * nEmb;
     return logLikelihood - 0.5*nParams*math.log(N);
   }
