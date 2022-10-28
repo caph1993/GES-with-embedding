@@ -1,5 +1,7 @@
 //@ts-check
+/// <reference path="./putTools.js" />
 
+var /** @type {*}*/ d3 = eval("window['d3']");
 
 
 class PDAG {
@@ -20,12 +22,109 @@ class PDAG {
     this.mat = adjMatrix;
   }
 
-  forwardNeighbors(){
-    
+  /**
+   * @param {number} n
+   */
+  static newDisconnected(n){
+    const mat = d3.range(n).map(i => d3.range(n).map(j=>0));
+    return new PDAG(mat);
   }
 
-  backwardNeighbors(){
-    
+  /**
+   * @param {1|2} phase
+   */
+  *iterNeighbors(phase) {
+    const {n, mat} = this;
+    if(phase == 1){
+      for(let y = 0; y < n; y++){
+        // const N_y = d3.range(n).filter(x=>mat[x][y]&&mat[y][x]);
+        for(let x=0; x < n; x++) if(!mat[x][y] && !mat[y][x]){ // check this if(...)!
+          for(let DagPaBefore of this.iterBlockingCliques(x, y)){
+            const DagPaAfter = [...DagPaBefore, x];
+            yield [y, DagPaAfter, DagPaBefore];  
+          }
+        }
+      }
+    }
+
+  }
+  /**
+   * @param {number} x
+   * @param {number} y
+   */
+  *iterBlockingCliques(x, y) {
+    const {n, mat} = this;
+    // Same as calling blocksAllSemiDirected(y,x,T) on each T yield by iterCliques(N_y, NA_yx)
+    function *iterT(/**@type {number[]}*/ set, /**@type {number[]}*/ fixed, /**@type {boolean}*/ blocks) {
+      yield [fixed, blocks];
+      for(let t of set){
+        if(d3.every(fixed, z=>mat[z][t]||mat[t][z])){ //?? definition of adj for clique
+          const setMinus_t = set.filter(z=>z!=t);
+          fixed.push(t);
+          const blocks_t = blocks||this.blocksAllSemiDirected(y, x, fixed)
+          for(let out of this.iter(setMinus_t, fixed, blocks_t)) yield out;
+          fixed.pop();
+        }
+      }
+    }
+    const N_y = d3.range(n).filter(x=>mat[x][y]&&mat[y][x]);
+    const A_x = d3.range(n).filter(z=>mat[x][z]||mat[z][x]);
+    const NA_yx = d3.intersection(N_y, A_x);
+    const initialBlocks = this.blocksAllSemiDirected(y, x, NA_yx);
+    for(let [DagPa, blocks] of iterT(N_y, NA_yx, initialBlocks)) if(blocks) yield DagPa;
+  }
+  /**
+   * @param {number} x
+   * @param {number} y
+   */
+  *iterBlockingCliques_2(x, y) { // Without blocks optimization
+    const {n, mat} = this;
+    const N_y = d3.range(n).filter(x=>mat[x][y]&&mat[y][x]);
+    const A_x = d3.range(n).filter(z=>mat[x][z]||mat[z][x]);
+    const NA_yx = d3.intersection(N_y, A_x);
+    for(let DagPa of this.iterCliques(N_y, NA_yx)){
+      if(this.blocksAllSemiDirected(y, x, DagPa)) yield DagPa;
+    }
+  }
+
+  /**
+   * @param {number[]} set
+   * @param {number[]} fixed
+   */
+  *iterCliques(set, fixed) {
+    const {mat} = this;
+    // Iterates on S = d3.union(T, fixed) where T is subset of set and S is a clique
+    // Assumes fixed is a clique.
+    yield fixed;
+    for(let t of set){
+      if(d3.every(fixed, z=>mat[z][t]||mat[t][z])){ //?? definition of adj for clique
+        const setMinus_t = set.filter(z=>z!=t);
+        fixed.push(t);
+        for(let out of this.iterCliques(setMinus_t, fixed)) yield out;
+        fixed.pop();
+      }
+    }
+  }
+
+  /**
+   * @param {number} src
+   * @param {number} tgt
+   * @param {any} wall
+   */
+  blocksAllSemiDirected(src, tgt, wall){
+    const {mat, n} = this;
+    let Q = [src];
+    let vis = new Set(wall);
+    vis.add(src);
+    while(Q.length>0){
+      let x = nonNull(Q.pop())
+      for(let y = 0; y<n;y++) if(!vis.has(y) && mat[x][y]){
+        Q.push(y);
+        vis.add(y);
+        if(y==tgt) return false;
+      }
+    }
+    return true;
   }
 
   isComplete(){
@@ -36,51 +135,52 @@ class PDAG {
   complete(){
     
   }
+
   extendWith(){
     
   }
 
-  extension(){
-    // DAG such that all directed arrows in this coincide with those in DAG 
-    /*
-    Dor 1992
-    https://scholar.google.com/scholar?cluster=2669812910163446809
-    G = copy of self
-    A = copy of self
-    while A has nodes:
-        Select a vertex x which satisfies the following properties in the subgraph A:
-          a. x is a sink (no edge ( x , y ) in A is directed outward from x)
-          b. For every vertex y , adjacent to x, with ( x ^ y ) undirected, y is adjacent to all the other vertices which are adjacent to x;
 
-        Let all the edges which are incident to x in A be directed toward x in G
+  /*
+  Dor 1992
+  https://scholar.google.com/scholar?cluster=2669812910163446809
+  G = copy of self
+  A = copy of self
+  while A has nodes:
+      Select a vertex x which satisfies the following properties in the subgraph A:
+        a. x is a sink (no edge ( x , y ) in A is directed outward from x)
+        b. For every vertex y , adjacent to x, with ( x ^ y ) undirected, y is adjacent to all the other vertices which are adjacent to x;
 
-        A := A — x (remove x and all the edges incident to x)
-    return G' (an extension of the input pdag G)
-    */
+      Let all the edges which are incident to x in A be directed toward x in G
 
-    // Initialize G and A
-    // A is represented in multiple forms to improve speed and readability
+      A := A — x (remove x and all the edges incident to x)
+  return G' (an extension of the input pdag G)
+  */
+  DAG_Extension(){
+    // DAG such that all directed arrows in this coincide with those in DAG. null if impossible
     const {n, mat} = this;
+    // Initialize G and A
     const /**@type {number[][]}*/G = d3.range(n).map(()=>d3.range(n).map(()=>0));
     const nodesMask = new Set(d3.range(n))
-    const AParents = d3.range(n).map(()=> new Set());
-    const ADirChildren = d3.range(n).map(()=> new Set());
-    const AAdjacent = d3.range(n).map(()=> new Set());
-    const ANeighbors = d3.range(n).map(()=> new Set());
+    // A is represented in multiple forms to improve speed and readability
+    const A_Parents = d3.range(n).map(()=> new Set());
+    const A_DirChildren = d3.range(n).map(()=> new Set());
+    const A_Adjacent = d3.range(n).map(()=> new Set());
+    const A_Neighbors = d3.range(n).map(()=> new Set());
     for(let i=0;i<n;i++){
       for(let j=0;j<n;j++){
         G[i][j] = 1;
         if(mat[i][j]){
-          AParents[j].add(i);
-          AAdjacent[j].add(i);
-          AAdjacent[i].add(j);
-          if(!mat[j][i]) ADirChildren[i].add(j)
-          else ANeighbors[i].add(j)
+          A_Parents[j].add(i);
+          A_Adjacent[j].add(i);
+          A_Adjacent[i].add(j);
+          if(!mat[j][i]) A_DirChildren[i].add(j)
+          else A_Neighbors[i].add(j)
         }
       }
     }
-    const condition = (x)=>(!ADirChildren[x] &&
-      d3.every(ANeighbors[x], (y)=>d3.every(AAdjacent[x], (z)=>AAdjacent[z].has(y)))
+    const condition = (x)=>(!A_DirChildren[x] &&
+      d3.every(A_Neighbors[x], (y)=>d3.every(A_Adjacent[x], (z)=>A_Adjacent[z].has(y)))
     );
     while(nodesMask.size){
       // select the vertex x
@@ -88,55 +188,231 @@ class PDAG {
       for(let x_ of nodesMask){
         if(condition(x_)) {x=x_; break;}
       }
-      if(x == null){
-        return; // No extension exists
-      }
+      if(x == null) return null; // No extension exists
       // update G
-      for(let y of AAdjacent[x]){
+      for(let y of A_Adjacent[x]){
         G[y][x] = 1;
         G[x][y] = 0;
       }
       // remove x from A
       nodesMask.delete(x)
-      for(let S of [AParents, AAdjacent, ADirChildren, ANeighbors]){
+      for(let S of [A_Parents, A_Adjacent, A_DirChildren, A_Neighbors]){
         for(let v=0;v<n;v++) S[v].delete(x);
         S[x].clear();
       }
     }
-
-    return DAG.from_matrix(G)
+    return new PDAG(G);
   }
 
-  score() {
+}
 
+
+
+var math = window["math"];
+
+class Model{
+
+  /**
+   * @param {{[key:string]:any}[]} csvData
+   * @param {string[]} columns
+   * @param {{[key:string]:boolean}} isCategorical
+   */
+  constructor(csvData, columns, isCategorical){
+    let data = csvData.map(d=>columns.map(key=>d[key]));
+    const N = data.length;
+    const n = this.n = columns.length;
+    this.nCatOfCats = 0;
+    this.nCat = 0;
+    this.nCategories = utils.zeros(n);
+    this.catEncodings = d3.range(n).map(()=>[]);
+    for(let k in columns){
+      if(isCategorical[columns[k]]){
+        this.nCat++;
+        const encoding = [...new Set(data.map(vec=>vec[k]))];
+        console.log(encoding);
+        const inv = Object.fromEntries(encoding.map((x,i)=>[x,i]));
+        this.catEncodings[k] = encoding;
+        this.nCategories[k] = encoding.length;
+        this.nCatOfCats += encoding.length;
+        for(let i=0;i<N;i++) data[i][k] = inv[data[i][k]];
+      } else {
+        for(let i=0;i<N;i++) data[i][k] = parseFloat(data[i][k]);
+      }
+    }
+    this.dataWithNans = data;
+    this.data = data.filter(l=>d3.every(l, x=>Number.isFinite(x)));
+    this.N = data.length;
+    console.log(this.dataWithNans);
+    console.log(this.data);
   }
-}
 
-const GES = (data, isCategorical, dStar)=>{
-  
-  return ;
-}
+  statefulGES(){
+    const {n} = this;
+    const P = PDAG.newDisconnected(n);
+    let state = {
+      score: 0,
+      phase: /**@type {1|2}*/(1),
+      steps: 0,
+      stepEnd: false,
+      microSteps: 0,
+      pause: false,
+      algorithmEnd: false,
+    };
+    const current$ = new RX(0);
+    const proposal$ = new RX(/**@type {{delta:number, update:any[]}|null}*/(null));
+    const bestProposal$ = new RX(/**@type {{delta:number, update:any[]}|null}*/(null));
+    function *iterGES(){
+      for(let phase of /**@type {(1|2)[]}*/([1,2])){
+        state.phase = phase;
+        state.steps = 0;
+        while(true){
+          state.stepEnd = false;
+          let nextUpdate = null;
+          let nextDelta = 0;
+          for(let update of P.iterNeighbors(phase)){
+            let [y, DagPaAfter, DagPaBefore] = update;
+            const delta = this.localScore(y, DagPaAfter) - this.localScore(y, DagPaBefore);
+            if(delta > nextDelta){
+              nextDelta = delta;
+              nextUpdate = update;
+              bestProposal$.set({delta, update});
+            }
+            state.microSteps++;
+            proposal$.set({delta, update});
+            yield null;
+          }
+          state.steps++;
+          state.stepEnd = true;
+          if(nextUpdate == null) break;
+          // Apply update
+          let [y, DagPaAfter, _] = nextUpdate;
+          for(let x of DagPaAfter){
+            P.mat[x][y] = 1;
+            P.mat[y][x] = 0;
+          }
+          state.score += nextDelta;
+          current$.set(current$.value++);
+          yield null;
+        }
+        current$.set(current$.value++);
+        yield null;
+      }
+      state.algorithmEnd = true;
+      current$.set(current$.value++);
+    }
+    const iter = iterGES.bind(this)();
+    const microStep = ()=>{ iter.next();}
+    const step = ()=>{ while(!iter.next().done) if(state.stepEnd || state.pause) return; }
+    const allSteps = ()=>{ while(!iter.next().done) if(state.pause) return; }
+    return {P, state, step, microStep, allSteps, current$, proposal$, bestProposal$};
+  }
 
+  /**
+   * @param {number} y
+   * @param {number[]} DagPa
+   * DagPa is the list of parents of y in a DAG_Extension of this
+   * (see the proof of Theorem 15)
+   */
+  localScore(y, DagPa){
+    const {data:fullData, N, nCategories:fullNCategories} = this;
+
+    console.log(fullData);
+    const {data, nCat, nColumns, nCategories} = (()=>{
+      // Filter relevant columns
+      let columns = [y, ...DagPa];
+      // Put categorical variables first
+      columns = d3.sort(columns, k=>fullNCategories[k]==0?1:0);
+      const nCat = d3.sum(d3.map(columns, k=>fullNCategories[k]==0?0:1));
+      // Re-index the data 
+      const data = utils.zeros(N, columns.length);
+      
+      for(let i = 0; i<N; i++) for(let j = 0; j<columns.length; j++){
+        data[i][j] = fullData[i][columns[j]];
+      }
+      const nCategories = utils.zeros(nCat);
+      for(let j = 0; j<columns.length; j++){
+        nCategories[j] = fullNCategories[columns[j]];
+      }
+      return {data, nCat, nColumns:columns.length, nCategories};
+    })();
+
+    const nCatOfCat = d3.sum(nCategories);
+    let nEmb = nCat<=1? nCat : nCatOfCat<=8? 2: nCatOfCat<=27? 3: nCatOfCat<=64? 4: 5;
+    let n = nColumns - nCat + nEmb;
+    
+    // Initialize the model parameters
+    let weights = d3.range(nCat).map(()=>1/nCat);
+    let mu = utils.zeros(n);
+    let sigma = utils.zeros(n, n);
+    let centroids = d3.range(nCat).map(k=>d3.range(nCategories[k]).map(()=> d3.range(nEmb).map(()=>0)));
+
+    let nIters = 30;
+    while(nIters-- > 0){
+      // Estimate the embeddings using continuous data
+      let sigma12 = math.matrix(d3.range(0, nEmb).map(a=>d3.range(nEmb, n).map(b=>sigma[a][b])));
+      let sigma22 = math.matrix(d3.range(nEmb, n).map(a=>d3.range(nEmb, n).map(b=>sigma[a][b])));
+      let auxMatrix = math.multiply(sigma12, math.inv(sigma22));
+      
+
+      let muEm = d3.range(N).map(i=>{
+        const dataCont = data[i].slice(nEmb, n);
+        return math.add(
+          mu.slice(0, nEmb),
+          math.multiply(auxMatrix, math.subtract(dataCont, mu.slice(nEmb, n))),
+        );
+      });
+      const softMax = (vec)=> {
+        const pow = vec.map(x=>math.exp(x));
+        const sum = d3.sum(pow)
+        return pow.map(x=>x/sum);
+      }
+      // Update the model connecting embedding with categorical data
+      weights = d3.mean(d3.transpose(d3.range(N).map(i=>softMax(d3.range(nCat).map(k=>-math.square(math.subtract(muEm[i], centroids[k][data[i][k]])))))));
+      centroids = d3.range(nCat).map(k=>{
+        const centroids = utils.zeros(nCategories[k], nEmb);
+        for(let i=0; i<N; i++) for(let j=0; j<nEmb; j++) centroids[data[i][k]][j]+=nEmb[j];
+        const sum = utils.zeros(nCategories[k], nEmb);
+        for(let i=0; i<N; i++) for(let j=0; j<nEmb; j++) sum[data[i][k]][j]++;
+        for(let A=0; A<nCategories[k]; A++) for(let j=0; j<nEmb; j++) centroids[A][j]/=sum[A][j];
+        return centroids;
+      });
+
+      // Estimate the embeddings using discrete data
+      muEm = d3.range(N).map(i=>()=>{
+        const muEm = utils.zeros(nEmb);
+        for(let k=0; k<nCat; k++) for(let j=0; j<nEmb; j++) muEm[j]+=weights[k]*centroids[k][data[i][k]];
+        return muEm;
+      });
+      
+      // Update the model connecting embedding with continuous data
+      for(let j=0; j<n; j++) mu[j] = 0;
+      for(let j=0; j<n; j++) for(let i=0; i<N; i++) mu[j] += data[i][j];
+      for(let j=0; j<n; j++) mu[j] /= N;
+
+      for(let a=0; a<n; a++) for(let b=0; b<n; b++) sigma[a][b] = 0;
+      for(let a=0; a<n; a++) for(let b=a; b<n; b++) for(let i=0; i<N; i++){
+        sigma[a][b] += (data[i][a]-mu[a])*(data[i][b]-mu[b]);
+      }
+      for(let a=0; a<n; a++) for(let b=a; b<n; b++) sigma[b][a] = (sigma[a][b] /= N);
+    }
+
+    // Compute the log-likelihood
+    const x_minus_mu = math.matrix(d3.range(N).map(i=>{
+      let x = [...data[i]]
+      for(let j=0; j<nEmb; j++) x[j] = centroids[j][x[j]];
+      for(let j=0; j<n; j++) x[j] -= mu[j];
+      return [x];
+    }));
+    let logLikelihood = -0.5*math.log(2*math.pi*N); // unnecessary constant, but clear 
+    logLikelihood += -0.5*math.multiply(math.multiply(x_minus_mu, sigma), math.transpose(x_minus_mu));
+    let nParams = n/*mu*/ + n*n /*sigma*/ + /*weights*/ nCat + /*centroids*/ nCatOfCat * nEmb;
+    return logLikelihood - 0.5*nParams*math.log(N);
+  }
+
+}
 
 
 `
-class PDAG:
-    mat: np.ndarray
-    n: int
-
-    @classmethod
-    def from_matrix(cls, mat: np.ndarray):
-        pdag = cls.__new__(cls)
-        pdag.mat = mat
-        pdag.n = len(mat)
-        mat.flags.writeable = False  # Own the matrix
-        assert mat.shape == (pdag.n, pdag.n)
-
-    def copy(self):
-        cls = self.__class__
-        cpy = cls.__new__(cls)
-        return cpy
-
 
 class DAG(PDAG):
 
@@ -234,52 +510,4 @@ class CPDAG(PDAG):
         return cls()
 
 
-class Model:
-
-    def __init__(self, data, data_types):
-        self.data = data
-        self.data_types = data_types
-        return
-
-    def GES(self):
-        P = CPDAG.new_disconnected(len(self.data))
-        score = 0
-        # Forward phase:
-        while True:
-            Q, delta = self.best_forward_neighbor(P)
-            if delta <= 0:
-                break
-            P, score = Q, score + delta
-        # Backward phase:
-        while True:
-            Q, delta = self.best_backward_neighbor(P)
-            if delta <= 0:
-                break
-            P, score = Q, score + delta
-        return P, score
-
-    def best_forward_neighbor(self, P: CPDAG):
-        it = self.iter_scored_forward_neighbors(P)
-        return max(it, key=lambda t: t[1])
-
-    def iter_scored_forward_neighbors(self, P: CPDAG):
-        for Q, change in P.iter_forward_neighbors():
-            delta = 0.0
-            yield Q, delta
-        return
-
-    def best_backward_neighbor(self, P: CPDAG):
-        it = self.iter_scored_backward_neighbors(P)
-        return max(it, key=lambda t: t[1])
-
-    def iter_scored_backward_neighbors(self, P: CPDAG):
-        for Q, change in P.iter_backward_neighbors():
-            i, Pa = change
-            delta = self.local_score(i, Pa) - self.local_score(i, Pa)
-
-            yield Q, delta
-        return
-
-    def local_score(self, i: int, Pa: Collection[int]):
-        return 0.0
 `

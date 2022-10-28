@@ -1,4 +1,6 @@
 //@ts-check
+/// <reference path="./putTools.js" />
+/// <reference path="./GES.js" />
 
 const fileInput = (csv$)=>{
   const file$ = new RX(/** @type {*} */(null));
@@ -59,17 +61,83 @@ const variableTypeSelector = (csv, isCategorical$)=>{
 }
 
 const runControls = (csv, isCategorical)=>{
+
+
+  const model = new Model(csv, csv.columns, isCategorical);
+  const {P, state, step, allSteps, microStep, current$, proposal$, bestProposal$} = model.statefulGES();
   const running$ = new RX(false);
-  const runButton = put('button $', 'Run');
-  runButton.onclick = ()=>running$.set(true);
-  const pauseButton = put('button $', 'Pause');
-  pauseButton.onclick = ()=>running$.set(false);
+  console.log(csv.columns)
+  const graphLabels = (()=>{
+    const shorts = csv.columns.map(s=>s.substring(0,3));
+    return shorts;
+  })()
+
+  const runStep = put('button $', '--step-->');
+  runStep.onclick = ()=>{
+    state.pause = false;
+    running$.set(true);
+    step();
+    running$.set(false);
+  }
+  const runMicroStep = put('button $', '--microStep-->');
+  runMicroStep.onclick = ()=>{
+    state.pause = false;
+    running$.set(true);
+    microStep();
+    running$.set(false);
+  }
+  const runAllSteps = put('button $', 'Run (all steps)');
+  runAllSteps.onclick = ()=>{
+    state.pause = false;
+    running$.set(true);
+    allSteps();
+    running$.set(false);
+  }
+  
+  const pause = put('button $', 'Pause');
+  pause.onclick = ()=>{
+    state.pause = true;
+    running$.set(false);
+  }
   running$.subscribe((running)=>{
-    put(runButton, running? '[disabled]':'[!disabled]');
-    put(pauseButton, running? '[!disabled]':'[disabled]');
+    put(runStep, running? '[disabled]':'[!disabled]');
+    put(runMicroStep, running? '[disabled]':'[!disabled]');
+    put(runAllSteps, running? '[disabled]':'[disabled]');
+    put(pause, running? '[!disabled]':'[disabled]');
   });
 
-  return [runButton, pauseButton];
+  const score = putText(current$.map(()=>state.score));
+  const vizLoading = `graph G{\nbgcolor=lightgray\ncolor=black\n a [label="Loading"]; }`;
+  const vizTooLarge = (n)=>`graph G{\nbgcolor=lightgray\ncolor=black\n a [label="Too large to be displayed: ${n} nodes"]; }`;
+  return [
+    runStep,
+    runMicroStep,
+    runAllSteps,
+    pause,
+    ...putNodes`<div>Score: ${score}</div>`,
+    ...putNodes`<div>Proposal: ${proposal$.map(p=>p&&p.delta)}</div>`,
+    ...putNodes`<div>Best proposal: ${bestProposal$.map(p=>p&&p.delta)}</div>`,
+    ...DotGraphViz(current$.map(()=>{
+      if(P.n >= 60) return vizTooLarge(P.n);
+      let arrows = [];
+      for(let a=0;a<P.n;a++) for(let b=a+1;b<P.n;b++) if(P.mat[a][b]||P.mat[b][a]){
+        if(!P.mat[a][b]) arrows.push(`${b} -> ${a};`); 
+        else if(!P.mat[b][a]) arrows.push(`${a} -> ${b};`); 
+        else arrows.push(`${b} -- ${a};`); 
+      }
+      const sNodes = d3.range(P.n).map(i=>`${i} [label="${graphLabels[i]}"];`).join('\n');
+      const sArrows = arrows.join('\n');
+      const dot = `
+      digraph G{
+        bgcolor="#eeeeee"
+        node [fontcolor="#000000"];
+        edge [color="#000000"];
+        ${sNodes}
+        ${sArrows}
+      }`
+      return dot;
+    })),
+  ];
 }
 
 

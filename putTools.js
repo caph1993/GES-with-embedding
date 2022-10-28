@@ -5,9 +5,10 @@
 /** @typedef {Node|RenderConstant1} RenderConstant2 */
 /** @typedef {RenderConstant2|RenderConstant2[]} RenderConstant3 */
 
-async function sleep(ms) {
+async function sleep(/** @type {number}*/ ms) {
   await new Promise((ok, err) => setTimeout(ok, ms));
 }
+
 async function until(/** @type {()=>any}*/ func, { ms = 200, timeout = 0 } = {}) {
   if (timeout && ms > timeout) ms = timeout / 10;
   let t0 = (new Date()).getTime();
@@ -19,6 +20,14 @@ async function until(/** @type {()=>any}*/ func, { ms = 200, timeout = 0 } = {})
   }
   return value;
 }
+
+/** @template T @param {T} value @returns {T extends null ? never : T extends undefined ? never : T} */
+function nonNull(value) {
+  if (!value && (value===null||value === undefined)) throw new Error(`Encountered unexpected undefined value`);
+  return /** @type {*} */ (value);
+}
+
+
 
 let putFlatten = (/** @type {Node|Node[]} */ fragment)=>{
   const flat = [];
@@ -368,7 +377,7 @@ document.head.append(put('style', `
   display: none
 }`));
 const Switch = ({key$}, ...children)=>{
-  children = (children||[...this.children]).map(child=>({
+  children = children.map(child=>({
     caseKey: child.attributes['case']?.value,
     isDefault: !!child.attributes['default'],
     elem: child,
@@ -542,3 +551,39 @@ function mainBody(...children){
     </div>
   `;
 }
+
+
+document.head.append(put('style', `
+.graphviz-hidden {
+  display: none;
+}
+.dotGraphViz {
+  text-align: center;
+  background-color: #EBEBEB; overflow-x:clip;
+  box-shadow: 0px 0px 3px 0px grey;
+  margin: 5px;
+  cursor: move;
+}`));
+const DotGraphViz = (dotCode$)=>{
+  const graphId = (''+Math.random()).slice(2);
+  const graphDiv = put(`div#graph${graphId}.dotGraphViz`);
+  dotCode$.subscribe(async (dotCode)=>{
+    if(!dotCode) put(graphDiv, '.graphviz-hidden');
+    else{
+      await until(()=>d3.select(`#graph${graphId}`));
+      put(graphDiv, '!graphviz-hidden');
+      d3.select(`#graph${graphId}`).graphviz().renderDot(dotCode);
+    }
+  });
+  return [graphDiv];
+}
+
+
+var utils = (()=>{
+  const zeros = (...sizes)=>{
+    let arr = Array(sizes[0]).fill(0);
+    if(sizes.length==1) return arr;
+    else return arr.map(()=>zeros(...sizes.slice(1)));
+  }
+  return {zeros}
+})();
