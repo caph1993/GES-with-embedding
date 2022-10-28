@@ -418,9 +418,10 @@ class Model{
       return x;
     }));
     let logLikelihood = -0.5*math.log(2*math.pi*N); // unnecessary constant, but clear 
-    logLikelihood += -0.5*x_minus_mu.mmul(new mlMatrix.Matrix(sigma)).mmul(x_minus_mu.transpose());
+    let arr = x_minus_mu.mmul(new mlMatrix.Matrix(sigma)).mmul(x_minus_mu.transpose());
+    logLikelihood += -0.5*d3.sum(arr.data);
     let nParams = n/*mu*/ + n*n /*sigma*/ + /*weights*/ nCat + /*centroids*/ nCatOfCat * nEmb;
-    return logLikelihood - 0.5*nParams*math.log(N);
+    return logLikelihood - 0.5*nParams*Math.log(N);
   }
 
 }
