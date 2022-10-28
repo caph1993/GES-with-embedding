@@ -266,7 +266,9 @@ class Model{
         while(true){
           state.stepEnd = false;
           let nextUpdate = null;
-          let nextDelta = -(1<<49);
+          let nextDelta = 0;
+          proposal$.set(null);
+          bestProposal$.set(null);
           for(let update of P.iterNeighbors(phase)){
             let [y, DagPaAfter, DagPaBefore] = update;
             const delta = this.localScore(y, DagPaAfter) - this.localScore(y, DagPaBefore);
@@ -300,8 +302,12 @@ class Model{
     }
     const iter = iterGES.bind(this)();
     const microStep = ()=>{ iter.next();}
-    const step = ()=>{ while(!iter.next().done) if(state.stepEnd || state.pause) return; }
-    const allSteps = ()=>{ while(!iter.next().done) if(state.pause) return; }
+    const step = async ()=>{
+      while(!iter.next().done) if(state.stepEnd || state.pause) return; else await sleep(0);
+    }
+    const allSteps = async ()=>{
+      while(!iter.next().done) if(state.pause) return; else await sleep(0);
+    }
     return {P, state, step, microStep, allSteps, current$, proposal$, bestProposal$};
   }
 
@@ -408,18 +414,19 @@ class Model{
     }
 
     // Compute the log-likelihood
-    const x_minus_mu = new mlMatrix.Matrix(d3.range(N).map(i=>{
+    const arr = d3.range(N).map(i=>{
       let x = utils.zeros(n);
       for(let k=0; k<nCat; k++){
         for(let j=0; j<nEmb; j++) x[j] += weights[k] * centroids[k][data[i][j]]; 
       }
       for(let j=nCat; j<n; j++) x[j] = data[i][j+nCat];
       for(let j=0; j<n; j++) x[j] -= mu[j];
-      return x;
-    }));
-    let logLikelihood = -0.5*math.log(2*math.pi*N); // unnecessary constant, but clear 
-    let arr = x_minus_mu.mmul(new mlMatrix.Matrix(sigma)).mmul(x_minus_mu.transpose());
-    logLikelihood += -0.5*d3.sum(arr.data);
+      x = mlMatrix.Matrix.columnVector(x);
+      const out = x.transpose().mmul(sigma).mmul(x)
+      return out.data[0][0];
+    });
+    let logLikelihood = 0//-0.5*Math.log(2*Math.PI*N); // ?? missing rank and pseudo determinant
+    logLikelihood += -0.5*d3.sum(arr);
     let nParams = n/*mu*/ + n*n /*sigma*/ + /*weights*/ nCat + /*centroids*/ nCatOfCat * nEmb;
     return logLikelihood - 0.5*nParams*Math.log(N);
   }

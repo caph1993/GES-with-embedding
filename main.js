@@ -76,22 +76,31 @@ const runControls = (csv, isCategorical)=>{
   runStep.onclick = ()=>{
     state.pause = false;
     running$.set(true);
-    step();
-    running$.set(false);
+    (async ()=>{
+      await sleep(1);
+      step();
+      running$.set(false);
+    })()
   }
   const runMicroStep = put('button $', '--microStep-->');
   runMicroStep.onclick = ()=>{
     state.pause = false;
     running$.set(true);
-    microStep();
-    running$.set(false);
+    (async ()=>{
+      await sleep(1);
+      microStep();
+      running$.set(false);
+    })()
   }
   const runAllSteps = put('button $', 'Run (all steps)');
   runAllSteps.onclick = ()=>{
     state.pause = false;
     running$.set(true);
-    allSteps();
-    running$.set(false);
+    (async ()=>{
+      await sleep(1);
+      allSteps();
+      running$.set(false);
+    })()
   }
   
   const pause = put('button $', 'Pause');
@@ -116,7 +125,7 @@ const runControls = (csv, isCategorical)=>{
     pause,
     ...putNodes`<div>Score: ${score}</div>`,
     ...putNodes`<div>Proposal: ${proposal$.map(p=>p&&p.delta)}</div>`,
-    ...putNodes`<div>Best proposal: ${bestProposal$.map(p=>p&&p.delta)}</div>`,
+    ...putNodes`<div>Best proposal: ${bestProposal$.map(p=>(console.log(p), false)||p&&p.delta)}</div>`,
     ...DotGraphViz(current$.map(()=>{
       if(P.n >= 60) return vizTooLarge(P.n);
       let arrows = [];
