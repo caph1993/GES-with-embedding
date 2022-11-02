@@ -27,7 +27,7 @@ const fileInput = (csv$)=>{
   return root;
 }
 
-const variableTypeSelector = (csv, isCategorical$)=>{
+const variableTypeSelector = (csv, isCategorical$, loadedDataset$)=>{
   console.log(csv)
   const isCategorical$_ = new RX({});
   const root = put('div', [
@@ -53,126 +53,184 @@ const variableTypeSelector = (csv, isCategorical$)=>{
     ]),
     (()=>{
       const button = put('button $', 'Done');
-      button.onclick = ()=> isCategorical$.set(isCategorical$_.value);
+      button.onclick = ()=>{
+        isCategorical$.set(isCategorical$_.value);
+        loadedDataset$.trigger();
+      }
+      button.onclick(/**@type {*} */(null)); // AUTO-CLICK
       return button;
     })(),
   ])
   return root;
 }
 
-const runControls = (csv, isCategorical)=>{
 
 
-  const model = new Model(csv, csv.columns, isCategorical);
-  const {P, state, step, allSteps, microStep, current$, proposal$, bestProposal$} = model.statefulGES();
-  const running$ = new RX(false);
-  console.log(csv.columns)
-  const graphLabels = (()=>{
-    const shorts = csv.columns.map(s=>s.substring(0,3));
-    return shorts;
-  })()
 
-  const runStep = put('button $', '--step-->');
-  runStep.onclick = ()=>{
-    state.pause = false;
-    running$.set(true);
-    (async ()=>{
-      await sleep(1);
-      step();
-      running$.set(false);
-    })()
-  }
-  const runMicroStep = put('button $', '--microStep-->');
-  runMicroStep.onclick = ()=>{
-    state.pause = false;
-    running$.set(true);
-    (async ()=>{
-      await sleep(1);
-      microStep();
-      running$.set(false);
-    })()
-  }
-  const runAllSteps = put('button $', 'Run (all steps)');
-  runAllSteps.onclick = ()=>{
-    state.pause = false;
-    running$.set(true);
-    (async ()=>{
-      await sleep(1);
-      allSteps();
-      running$.set(false);
-    })()
-  }
-  
-  const pause = put('button $', 'Pause');
-  pause.onclick = ()=>{
-    state.pause = true;
-    running$.set(false);
-  }
-  running$.subscribe((running)=>{
-    put(runStep, running? '[disabled]':'[!disabled]');
-    put(runMicroStep, running? '[disabled]':'[!disabled]');
-    put(runAllSteps, running? '[disabled]':'[disabled]');
-    put(pause, running? '[!disabled]':'[disabled]');
-  });
-
-  const score = putText(current$.map(()=>state.score));
-  const vizLoading = `graph G{\nbgcolor=lightgray\ncolor=black\n a [label="Loading"]; }`;
-  const vizTooLarge = (n)=>`graph G{\nbgcolor=lightgray\ncolor=black\n a [label="Too large to be displayed: ${n} nodes"]; }`;
-  return [
-    runStep,
-    runMicroStep,
-    runAllSteps,
-    pause,
-    ...putNodes`<div>Score: ${score}</div>`,
-    ...putNodes`<div>Proposal: ${proposal$.map(p=>p&&p.delta)}</div>`,
-    ...putNodes`<div>Best proposal: ${bestProposal$.map(p=>(console.log(p), false)||p&&p.delta)}</div>`,
-    ...DotGraphViz(current$.map(()=>{
-      if(P.n >= 60) return vizTooLarge(P.n);
-      let arrows = [];
-      for(let a=0;a<P.n;a++) for(let b=a+1;b<P.n;b++) if(P.mat[a][b]||P.mat[b][a]){
-        if(!P.mat[a][b]) arrows.push(`${b} -> ${a};`); 
-        else if(!P.mat[b][a]) arrows.push(`${a} -> ${b};`); 
-        else arrows.push(`${b} -- ${a};`); 
-      }
-      const sNodes = d3.range(P.n).map(i=>`${i} [label="${graphLabels[i]}"];`).join('\n');
-      const sArrows = arrows.join('\n');
-      const dot = `
-      digraph G{
-        bgcolor="#eeeeee"
-        node [fontcolor="#000000"];
-        edge [color="#000000"];
-        ${sNodes}
-        ${sArrows}
-      }`
-      return dot;
-    })),
-  ];
-}
 
 
 (()=>{
-  // const csv$ = new RX(null);
-  //@ts-ignore
-  const csvTest = JSON.parse(localStorage.getItem('csv-test')); csvTest.columns = JSON.parse(localStorage.getItem('csv-columns'));
-  const csv$ = new RX(csvTest);
-  const isCategorical$ = new RX(null);
+  const csv$ = new RX(/**@type {*}*/(null));
+  const isCategorical$ = new RX(/**@type {*}*/(null));
+  const model$ = new RX(/**@type {Model} */(/**@type {*}*/(null)));
+  const loadedDataset$ = RX.trigger();
+
+  loadedDataset$.silentSubscribe(()=>{
+    const csv = csv$.value;
+    model$.set(new Model(csv, csv.columns, isCategorical$.value));
+  });
+
   const varSelector = put('div');
-  const controls = put('div');
-  const exported = mainBody(
-    put('h1', "Load dataset"),
-    fileInput(csv$),
-    put('h1', "Set variable types"),
-    varSelector,
-    put('h1', "GES"),
-    controls,
-  );
+
   csv$.subscribe(csv=>{
     if(csv==null) return;
     varSelector.replaceWith(variableTypeSelector(csv, isCategorical$));
-  })
-  isCategorical$.subscribe((isCategorical)=>{
-    if(isCategorical==null) return;
-    controls.replaceWith(...runControls(csv$.value, isCategorical));
-  })
+  });
+
+  const tabsData = put(put('div'), [
+    put('h1', "Load dataset"),
+    ...Tabs({ entries: [['upload', 'Dataset upload'], ['test', 'Synthetic test'], ['example', 'Example']],
+      localStorageKey: 'tab-dataset-upload'},
+      put(put('div[tab=$]', 'upload'), (()=>{
+        return [
+          fileInput(csv$),
+          put('h1', "Set variable types"),
+          varSelector,
+        ];
+      })()),
+      put(put('div[tab=$]', 'example'), (()=>{
+        const buttonAdult = put('button $', 'Load test-adult-100');
+        buttonAdult.onclick = ()=>{
+          //@ts-ignore
+          const csvTest = JSON.parse(localStorage.getItem('csv-test')); csvTest.columns = JSON.parse(localStorage.getItem('csv-columns'));
+          csv$.set(csvTest);
+        }
+        return buttonAdult;
+      })()),
+      put(put('div[tab=$]', 'test'), (()=>{
+        const dot$ = new RX('');
+        const viz = DotGraphViz(dot$);
+        const presetsSkeleton = {
+          vStructure: [3, [[0,1], [2, 1]]],
+          confounder: [3, [[1,0], [1, 2]]],
+          chain: [3, [[0,1], [1, 2]]],
+          pairAndOne: [3, [[2,1]]],
+          three: [3, []],
+          two: [2, []],
+          pair: [2, [[0,1]]],
+          one: [1, []],
+          six1: [6, [[0, 1], [0, 2], [1, 3], [1, 4], [2, 4], [3, 5], [4, 5]]],
+        };
+        const presetButtons = Object.entries(presetsSkeleton).map(([key, [n, edges]])=>{
+          const button = put('button $', key);
+          button.onclick = ()=>{
+            const columns = d3.range(n).map(i=>`X${i+1}`);
+            const G = Test_ContinuousDAG.random_weights(n, edges);
+            let data = G.sample_gaussian(6000)
+            data = data.map(d=>Object.fromEntries(d3.zip(columns, d)));
+            const mat = utils.zeros(n,n);
+            for(let [i,j,w] of G.edges_ijw) mat[i][j] = 1;
+            dot$.set(graphToDot(new PDAG(mat)));
+            model$.set(new Model(data, columns, {}));
+          }
+          return button;
+        });
+        //@ts-ignore
+        //(async()=>presetButtons[0].onclick(/**@type {*} */(null)))(); // AUTO-CLICK
+        return [...presetButtons, put('br'), viz];
+      })()),
+    ),
+  ]);
+  
+  const GesElem = put('div');
+
+  let mkGraphLabels = (model)=>{
+    const shorts = model.columnNames.map(s=>s.substring(0,3));
+    return shorts;
+  };
+
+  model$.subscribeOnce((model)=>{
+    let ges = model.statefulGES();
+    let graphLabels = mkGraphLabels(model);
+
+    model$.silentSubscribe((model)=>{
+      // Permanent subscription
+      const old = ges;
+      ges = model.statefulGES();
+      graphLabels = mkGraphLabels(model);
+      old.current$.set(ges.current$.value);
+      old.current$.remapMappings(ges.current$);
+      old.proposal$.remapMappings(ges.proposal$);
+      old.bestProposal$.remapMappings(ges.bestProposal$);
+      running$.notify();
+    });
+
+    const running$ = new RX(false);
+
+    const runStep = put('button $', '--step-->');
+    runStep.onclick = ()=>{
+      ges.state.pause = false;
+      running$.set(true);
+      (async ()=>{
+        await sleep(1);
+        await ges.step();
+        running$.set(false);
+      })()
+    }
+    const runMicroStep = put('button $', '--microStep-->');
+    runMicroStep.onclick = ()=>{
+      ges.state.pause = false;
+      running$.set(true);
+      (async ()=>{
+        await sleep(1);
+        await ges.microStep();
+        running$.set(false);
+      })()
+    }
+    const runAllSteps = put('button $', 'Run (all steps)');
+    runAllSteps.onclick = ()=>{
+      ges.state.pause = false;
+      running$.set(true);
+      (async ()=>{
+        await sleep(1);
+        await ges.allSteps();
+        running$.set(false);
+      })()
+    }
+
+    const pause = put('button $', 'Pause');
+    pause.onclick = ()=>{
+      ges.state.pause = true;
+      running$.set(false);
+    }
+    running$.subscribe((running)=>{
+      const canRun = !ges.state.algorithmEnd && !running;
+      put(runStep, canRun? '[!disabled]':'[disabled]');
+      put(runMicroStep, canRun? '[!disabled]':'[disabled]');
+      put(runAllSteps, canRun? '[!disabled]':'[disabled]');
+      put(pause, running? '[!disabled]':'[disabled]');
+    });
+
+    const score = putText(ges.current$.map(()=>ges.state.score));
+
+    GesElem.replaceChildren(...[
+      put('h1', "GES"),
+      runStep,
+      runMicroStep,
+      runAllSteps,
+      pause,
+      ...putNodes`<div>Score: ${score}</div>`,
+      ...putNodes`<div>Proposal: ${ges.proposal$.map(p=>p&&p.delta)}</div>`,
+      ...putNodes`<div>Best proposal: ${ges.bestProposal$.map(p=>p&&p.delta)}</div>`,
+      DotGraphViz(ges.current$.map(()=>ges.P&&graphToDot(ges.P, graphLabels))),
+    ]);
+    return;
+  });
+
+  const exported = mainBody(
+    tabsData,
+    GesElem,
+  );
+
   putLoader.exportDefault(exported);
 })()
