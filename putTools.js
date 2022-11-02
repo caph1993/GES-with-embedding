@@ -609,7 +609,7 @@ document.head.append(put('style', `
   margin: 5px;
   cursor: move;
 }`));
-const DotGraphViz = (dotCode$)=>{
+const DotGraphViz = (/** @type {RX<string>} */ dotCode$)=>{
   const graphId = (''+Math.random()).slice(2);
   const graphDiv = put(`div.dotGraphViz`, put(`div#graph${graphId}`));
   dotCode$.subscribe(async (dotCode)=>{
@@ -640,8 +640,28 @@ const graphToDot = (/** @type {null|PDAG} */ P, labels=null)=>{
   return `
   digraph G{
     bgcolor="#eeeeee"
-    node [fontcolor="#000000"];
-    edge [color="#000000"];
+    node [color="#000000",fontcolor="#000000"];
+    edge [color="#000000",fontcolor="#000000"];
+    ${sNodes}
+    ${sArrows}
+  }`
+}
+
+const weightedDagToDot = (/** @type {null|Test_ContinuousDAG} */ G, labels=null)=>{
+  const vizMessage = (msg)=>`graph G{\nbgcolor=lightgray\ncolor=black\n a [label="${msg}"]; }`;
+  if(!G) return vizMessage("No graph to show");
+  if(G.n >= 60) return vizMessage(`Too large to be displayed: ${G.n} nodes`);
+  let arrows = [];
+  for(let [i,j,w] of G.edges_ijw){
+    arrows.push(`${i} -> ${j} [label="${w.toFixed(1)}"];`);
+  }
+  const sNodes = d3.range(G.n).map(i=>`${i} [label="${labels?labels[i]:`X${i+1}`}"];`).join('\n');
+  const sArrows = arrows.join('\n');
+  return `
+  digraph G{
+    bgcolor="#eeeeee"
+    node [color="#000000",fontcolor="#000000"];
+    edge [color="#000000",fontcolor="#000000"];
     ${sNodes}
     ${sArrows}
   }`
@@ -656,3 +676,21 @@ var utils = (()=>{
   }
   return {zeros}
 })();
+
+
+
+const numberInputWithButtons = (num$ = new RX(0))=>{
+  const more = put('button $', '+');
+  const less = put('button $', '-');
+  const round = put('button $', 'round');
+  more.onclick = ()=> num$.set(Math.round(num$.value*1.3))
+  less.onclick = ()=> num$.set(Math.round(num$.value/1.3))
+  round.onclick = ()=>{
+    let n=num$.value, div = 10;
+    while(n>div && n%div==0) div*=10;
+    if(div>n) return; // Can't round
+    n = div*Math.floor(n/div);
+    num$.set(n);
+  }
+  return [putText(num$), putText(' '), more, less, round];
+}

@@ -121,23 +121,49 @@ const variableTypeSelector = (csv, isCategorical$, loadedDataset$)=>{
           one: [1, []],
           six1: [6, [[0, 1], [0, 2], [1, 3], [1, 4], [2, 4], [3, 5], [4, 5]]],
         };
+
+        /**@type {Test_ContinuousDAG} */
+        let G;
+        let columns;
+
+        const ulNoise = put('ul');
         const presetButtons = Object.entries(presetsSkeleton).map(([key, [n, edges]])=>{
           const button = put('button $', key);
           button.onclick = ()=>{
-            const columns = d3.range(n).map(i=>`X${i+1}`);
-            const G = Test_ContinuousDAG.random_weights(n, edges);
-            let data = G.sample_gaussian(6000)
-            data = data.map(d=>Object.fromEntries(d3.zip(columns, d)));
-            const mat = utils.zeros(n,n);
-            for(let [i,j,w] of G.edges_ijw) mat[i][j] = 1;
-            dot$.set(graphToDot(new PDAG(mat)));
-            model$.set(new Model(data, columns, {}));
+            G = Test_ContinuousDAG.random_weights(n, edges);
+            columns = d3.range(G.n).map(i=>`X${i+1}`);
+            dot$.set(weightedDagToDot(G));
+            put(doneButton, '[!disabled]');
+            ulNoise.replaceChildren(...[
+              ...d3.range(G.n).map(i=>
+                putNodes`Noise injected to ${columns[i]}: std=${G.nodes_noise[i].toFixed(1)}`
+              )
+            ].map(e=>put('li', e)));
           }
           return button;
         });
         //@ts-ignore
         //(async()=>presetButtons[0].onclick(/**@type {*} */(null)))(); // AUTO-CLICK
-        return [...presetButtons, put('br'), viz];
+        
+        const doneButton = put('button[disabled] $', 'Generate');
+        const nSamples$ = new RX(250);
+
+        doneButton.onclick = ()=>{
+          let data = G.sample_gaussian(nSamples$.value);
+          data = data.map(d=>Object.fromEntries(d3.zip(columns, d)));
+          model$.set(new Model(data, columns, {}));
+        }
+        return [
+          ...presetButtons,
+          put('br'),
+          viz,
+          ulNoise,
+          put('div', [
+            put('span $', 'Number of samples: '),
+            ...numberInputWithButtons(nSamples$),
+          ]),
+          doneButton,
+        ];
       })()),
     ),
   ]);
@@ -222,6 +248,7 @@ const variableTypeSelector = (csv, isCategorical$, loadedDataset$)=>{
       ...putNodes`<div>Score: ${score}</div>`,
       ...putNodes`<div>Proposal: ${ges.proposal$.map(p=>p&&p.delta)}</div>`,
       ...putNodes`<div>Best proposal: ${ges.bestProposal$.map(p=>p&&p.delta)}</div>`,
+      ...putNodes`<div>Data: ${model.N} samples, ${model.columnNames.length} columns</div>`,
       DotGraphViz(ges.current$.map(()=>ges.P&&graphToDot(ges.P, graphLabels))),
     ]);
     return;

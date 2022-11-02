@@ -241,7 +241,7 @@ class PDAG {
   }
 
   /** @param {number} x @param {number} y @param {number[]} T*/
-  safetyCheckT(x, y, T){
+  safetyCheckT(y, x, T){
     // Only for testing the implementation
     const {mat} = this;
     for(let t of T){
@@ -258,7 +258,7 @@ class PDAG {
   completionInPlace(){
     const {n, mat} = this;
     const DAG = this.DAG_Extension();
-    if(!DAG) throw this;
+    if(!DAG) throw ['Not a dag', this];
     const CP = DAG.completion();
     for(let i=0;i<n;i++) for(let j=0;j<n;j++) mat[i][j] = CP.mat[i][j];
   }
@@ -269,21 +269,22 @@ class PDAG {
 
 
   /*
+  Finds a DAG by directing all undirected edges of this PDAG
+  null if no such DAG exists.
   Dor 1992
   https://scholar.google.com/scholar?cluster=2669812910163446809
   G = copy of self
   A = copy of self
   while A has nodes:
       Select a vertex x which satisfies the following properties in the subgraph A:
-        a. x is a sink, i.e. no edge x -> y exists in A
-        b. the adjacent vertices of x form a clique
+        a. x is a sink, i.e. no edge x -> y (but possibly x--y) exists in A
+        b. the neighbors of x form a clique with adjacency relation
       
       Let all the edges which are incident to x in A be directed toward x in G
       A := A removing x (remove x and all the edges incident to x)
   return G' (an extension of the input pdag G)
   */
   DAG_Extension(){
-    // DAG such that all directed arrows in this coincide with those in DAG
     const {n, mat} = this;
     const isClique = this.isClique.bind(this);
     // Initialize G and A
@@ -291,69 +292,22 @@ class PDAG {
     const /**@type {number[][]}*/A = utils.zeros(n,n);
     let /**@type {number[]}*/nodesInA = d3.range(n);
     for(let i=0;i<n;i++) for(let j=0;j<n;j++) G[i][j] = A[i][j] = mat[i][j];
-    while(true){
+
+    while(nodesInA.length){
       const x = (()=>{
-        for(let i of nodesInA){
-          if(d3.some(nodesInA, j=>A[i][j] && !A[j][i])) continue;
-          const adj = nodesInA.filter(j=>A[i][j]||A[j][i]);
-          if(isClique(adj)) return i;
+        for(let x of nodesInA){
+          if(d3.some(nodesInA, z=>A[x][z] && !A[z][x])) continue;
+          const adj = nodesInA.filter(z=>A[x][z] && A[z][x]);
+          if(isClique(adj)) return x;
         }
         return null;
       })();
-      if(x==null) break;
+      if(x==null) return null;
       for(let i of nodesInA) if(A[i][x]){
         G[i][x] = 1;
         G[x][i] = 0;
       }
       nodesInA = nodesInA.filter(i=>i!=x);
-    }
-    return new DAG(G);
-  }
-
-  DAG_Extension2(){
-    // DAG such that all directed arrows in this coincide with those in DAG. null if impossible
-    const {n, mat} = this;
-    // Initialize G and A
-    const /**@type {number[][]}*/G = utils.zeros(n,n);
-    const nodesMask = new Set(d3.range(n))
-    // A is represented in multiple forms to improve speed and readability
-    const A_Parents = d3.range(n).map(()=> new Set());
-    const A_DirChildren = d3.range(n).map(()=> new Set());
-    const A_Adjacent = d3.range(n).map(()=> new Set());
-    const A_Neighbors = d3.range(n).map(()=> new Set());
-    for(let i=0;i<n;i++){
-      for(let j=0;j<n;j++){
-        G[i][j] = mat[i][j];
-        if(mat[i][j]){
-          A_Parents[j].add(i);
-          A_Adjacent[j].add(i);
-          A_Adjacent[i].add(j);
-          if(!mat[j][i]) A_DirChildren[i].add(j)
-          else A_Neighbors[i].add(j)
-        }
-      }
-    }
-    const condition = (x)=>(!A_DirChildren[x] &&
-      d3.every(A_Neighbors[x], (y)=>d3.every(A_Adjacent[x], (z)=>A_Adjacent[z].has(y)))
-    );
-    while(nodesMask.size){
-      // select the vertex x
-      let x = null;
-      for(let x_ of nodesMask){
-        if(condition(x_)) {x=x_; break;}
-      }
-      if(x == null) return null; // No extension exists
-      // update G
-      for(let y of A_Adjacent[x]){
-        G[y][x] = 1;
-        G[x][y] = 0;
-      }
-      // remove x from A
-      nodesMask.delete(x)
-      for(let S of [A_Parents, A_Adjacent, A_DirChildren, A_Neighbors]){
-        for(let v=0;v<n;v++) S[v].delete(x);
-        S[x].clear();
-      }
     }
     return new DAG(G);
   }
@@ -551,6 +505,7 @@ class Model{
           if(phase == PHASE.FORWARD){
             // Definition 12: rules for insert operator.
             let [y, x, T] = nextUpdate;
+            //P.safetyCheckT(y,x,T);
             P.mat[x][y] = 1;
             for(let t of T) P.mat[y][t] = 0;
           }
@@ -696,14 +651,14 @@ class Model{
       for(let a=0; a<n; a++) for(let b=a; b<n; b++) sigma[b][a] = (sigma[a][b] /= N);
     }
 
-    const dataEmb = nCat==0? data : d3.range(N).map(i=>{
-      let x = utils.zeros(n);
-      for(let k=0; k<nCat; k++){
-        for(let j=0; j<nEmb; j++) x[j] += weights[k] * centroids[k][data[i][j]];
-      }
-      for(let k=nCat; k<nColumns; k++) x[k] = data[i][k-nCat+nEmb];
-      return x;
-    });
+    // const dataEmb = nCat==0? data : d3.range(N).map(i=>{
+    //   let x = utils.zeros(n);
+    //   for(let k=0; k<nCat; k++){
+    //     for(let j=0; j<nEmb; j++) x[j] += weights[k] * centroids[k][data[i][j]];
+    //   }
+    //   for(let k=nCat; k<nColumns; k++) x[k] = data[i][k-nCat+nEmb];
+    //   return x;
+    // });
 
     // // Compute the log-likelihood
     // const sigmaInv = mlMatrix.pseudoInverse(new mlMatrix.Matrix(sigma));
@@ -872,7 +827,7 @@ class Test_ContinuousDAG {
 
   static random_weights(n, edges_ij){
     const edges_ijw = edges_ij.map(([i,j])=>[i, j, randn()]);
-    const nodesNoise = d3.range(n).map(x=> randn()**2);
+    const nodesNoise = d3.range(n).map(x=> Math.max(Math.abs(randn()),Math.abs(randn())));
     return new Test_ContinuousDAG(n, edges_ijw, nodesNoise);
   }
 
@@ -889,6 +844,12 @@ class Test_ContinuousDAG {
       for(let a of Ch[b]){
         for(let i = 0; i < size; i++) values[i][a] += W[b][a] * values[i][b];
       }
+    }
+    // Re normalization
+    for(let k=0; k<n;k++){
+      const mu = d3.mean(values.map(d=>d[k]));
+      const std = Math.pow(d3.variance(values.map(d=>d[k])) * (n/(n-1)), 0.5);
+      for(let i = 0; i<n; i++) values[i][k] = mu + (values[i][k]-mu)/std;
     }
     return values;
   }
