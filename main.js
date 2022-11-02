@@ -90,7 +90,9 @@ const variableTypeSelector = (csv, isCategorical$, loadedDataset$)=>{
   const tabsData = put(put('div'), [
     put('h1', "Load dataset"),
     ...Tabs({ entries: [['upload', 'Dataset upload'], ['test', 'Synthetic test'], ['example', 'Example']],
-      localStorageKey: 'tab-dataset-upload'},
+      localStorageKey: 'tab-dataset-upload',
+      defaultKey: 'test',
+    },
       put(put('div[tab=$]', 'upload'), (()=>{
         return [
           fileInput(csv$),
@@ -99,7 +101,7 @@ const variableTypeSelector = (csv, isCategorical$, loadedDataset$)=>{
         ];
       })()),
       put(put('div[tab=$]', 'example'), (()=>{
-        const buttonAdult = put('button $', 'Load test-adult-100');
+        const buttonAdult = put('button[disabled] $', 'Load test-adult-100... NOT READY');
         buttonAdult.onclick = ()=>{
           //@ts-ignore
           const csvTest = JSON.parse(localStorage.getItem('csv-test')); csvTest.columns = JSON.parse(localStorage.getItem('csv-columns'));
@@ -248,7 +250,7 @@ const variableTypeSelector = (csv, isCategorical$, loadedDataset$)=>{
       ...putNodes`<div>Score: ${score}</div>`,
       ...putNodes`<div>Proposal: ${ges.proposal$.map(p=>p&&p.delta)}</div>`,
       ...putNodes`<div>Best proposal: ${ges.bestProposal$.map(p=>p&&p.delta)}</div>`,
-      ...putNodes`<div>Data: ${model.N} samples, ${model.columnNames.length} columns</div>`,
+      ...putNodes`<div>Data: ${model$.map(model=>model.N)} samples, ${model$.map(model=>model.columnNames.length)} columns</div>`,
       DotGraphViz(ges.current$.map(()=>ges.P&&graphToDot(ges.P, graphLabels))),
     ]);
     return;
