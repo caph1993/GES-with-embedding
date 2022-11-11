@@ -20,6 +20,16 @@ const EDGE_LABELS = {
   UNKNOWN: 3,
 }
 
+function shuffleArray(array) {
+  for (var i = array.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var temp = array[i];
+    array[i] = array[j];
+    array[j] = temp;
+  }
+  return array;
+}
+
 class PDAG {
   /*
   Neighbor: --
@@ -69,7 +79,7 @@ class PDAG {
       }
     } else if(phase == PHASE.BACKWARD){
       for(let y = 0; y < n; y++){
-        for(let x=0; x < n; x++) if(mat[x][y] || mat[y][x]){
+        for(let x=0; x < n; x++) if(mat[x][y]){
           for(let H of this.iterDeleteH(y, x)){
             yield [y, x, H];
           }
@@ -259,7 +269,22 @@ class PDAG {
     const {n, mat} = this;
     const DAG = this.DAG_Extension();
     if(!DAG) throw ['Not a dag', this];
+    // Check the DAG
+    for(let i = 0; i<n; i++) for(let j = 0; j<n; j++) if(mat[i][j]){
+      if(!DAG.mat[i][j] && !DAG.mat[j][i]){
+        throw [`Expected ${i} --> ${j} or ${i} <-- ${j}`, mat, DAG.mat];
+      }
+      if(!mat[j][i] && (!DAG.mat[i][j] || DAG.mat[j][i])){
+        throw [`Expected ${i} --> ${j}`, mat, DAG.mat];
+      }
+    }
     const CP = DAG.completion();
+    // Check the CP
+    for(let i = 0; i<n; i++) for(let j = 0; j<n; j++) if(DAG.mat[i][j]){
+      if(!CP.mat[i][j] && !CP.mat[j][i]){
+        throw [`Expected ${i} --> ${j} or ${i} <-- ${j}`, DAG.mat, CP.mat];
+      }
+    }
     for(let i=0;i<n;i++) for(let j=0;j<n;j++) mat[i][j] = CP.mat[i][j];
   }
 
@@ -460,6 +485,7 @@ class Model{
 
     function *iterGES(){
       for(let phase of [PHASE.FORWARD, PHASE.BACKWARD]){
+        console.log(`Phase ${phase}`)
         state.phase = phase;
         state.steps = 0;
         while(true){
@@ -472,6 +498,7 @@ class Model{
             // Compute score simulating update
             let delta=0;
             if(phase == PHASE.FORWARD){
+              // Table 1: score update on insert
               let [y, x, T] = update;
               const relatives = [...new Set(d3.union(d3.union(P.NA_yx(y, x), T), P.Pa(y)))];
               for(let z of relatives) if(x==z) throw z;
@@ -480,8 +507,10 @@ class Model{
               delta = localScore(y, relatives) - prevScore;
             }
             else if(phase == PHASE.BACKWARD){
+              // Table 1: score update on delete
               let [y, x, H] = update;
-              let relatives = [...d3.union(d3.difference(P.NA_yx(y, x), H), P.Pa(y))].filter(z=>z!=x);
+              let relatives = [...d3.union(d3.difference(P.NA_yx(y, x), H), P.Pa(y).filter(z=>z!=x))];
+              for(let z of relatives) if(x==z) throw z;
               relatives.push(x);
               const prevScore = localScore(y, relatives);
               relatives.pop();
@@ -502,14 +531,16 @@ class Model{
           if(nextUpdate == null) break;
           // Apply update
           P._NA_yx = {}; // reset cache
+          console.log(`Apply update ${nextDelta.toFixed(4)}: ${nextUpdate[1]}-->${nextUpdate[0]}`, nextUpdate[2]);
           if(phase == PHASE.FORWARD){
             // Definition 12: rules for insert operator.
             let [y, x, T] = nextUpdate;
-            //P.safetyCheckT(y,x,T);
+            P.safetyCheckT(y,x,T);
             P.mat[x][y] = 1;
             for(let t of T) P.mat[y][t] = 0;
           }
           else if(phase == PHASE.BACKWARD){
+            // Definition 13: rules for delete operator.
             let [y, x, H] = nextUpdate;
             P.mat[x][y] = P.mat[y][x] = 0;
             for(let h of H) P.mat[h][y] = 0;
@@ -517,6 +548,7 @@ class Model{
           }
           else throw phase;
           P.completionInPlace(); // Transform to CPDAG
+          console.log(P.mat.map(row=>[...row]));
           state.score += nextDelta;
           current$.set(current$.value++);
           yield null;
@@ -526,6 +558,7 @@ class Model{
       }
       state.algorithmEnd = true;
       current$.set(current$.value++);
+      console.log(this._localScore);
     }
     const iter = iterGES.bind(this)();
     const microStep = ()=>{ iter.next();}
@@ -553,10 +586,93 @@ class Model{
    * (see the proof of Theorem 15)
    */
   localScore(y, DagPa){
-    const {data:fullData, N, nCategories:fullNCategories} = this;
     const key = `${y} ${d3.sort(DagPa)}`;
     if(this._localScore[key]!==undefined) return this._localScore[key];
+    return this._localScore[key] = this._computeLocalScore(y, DagPa, 2);
+  }
 
+  _computeLocalScore(y, DagPa, nSplits){
+    if(DagPa.length==1 && y<DagPa[0]) return this.localScore(DagPa[0], [y]);
+
+    const {data:fullData, N, nCategories:fullNCategories} = this;
+    const {data, nCat, nColumns, nCategories, yColumnIndex} = (()=>{
+      // Filter relevant columns
+      let columns = [y, ...DagPa];
+      // Put categorical variables first
+      columns = d3.sort(columns, k=>fullNCategories[k]==0?1:0);
+      const yColumnIndex = columns.map((src, i)=>({src,i})).filter(({src})=>src==y)[0].i;
+      const nCat = d3.sum(d3.map(columns, k=>fullNCategories[k]==0?0:1));
+      // Re-index the data
+      const data = utils.zeros(N, columns.length);
+
+      for(let i = 0; i<N; i++) for(let j = 0; j<columns.length; j++){
+        data[i][j] = fullData[i][columns[j]];
+      }
+      const nCategories = utils.zeros(nCat);
+      for(let j = 0; j<columns.length; j++){
+        nCategories[j] = fullNCategories[columns[j]];
+      }
+      return {data, nCat, nColumns:columns.length, nCategories, yColumnIndex};
+    })();
+
+    const nCatOfCat = d3.sum(nCategories);
+    let nEmb = nCat<=1? nCat : nCatOfCat<=8? 2: nCatOfCat<=27? 3: nCatOfCat<=64? 4: 5;
+    let n = nColumns - nCat + nEmb;
+
+    // Linear regression
+
+    
+    if(n==1){
+      const yArr = d3.range(N).map(i=> data[i][yColumnIndex]);
+      const valBootstrap = d3.range(nSplits).map(()=>{
+        let idx = shuffleArray(d3.range(N));
+        let trainIdx = idx.slice(0, Math.floor(N*0.75));
+        let valIdx = idx.slice(Math.floor(N*0.75), N);
+        const trainMu = d3.mean(trainIdx.map(i=>yArr[i]));
+        const valMse = d3.mean(valIdx.map(i=>Math.pow(yArr[i]-trainMu, 2)));
+        return valMse;
+      });
+      const score = d3.mean(valBootstrap) + 3*Math.sqrt(d3.variance(valBootstrap));
+      console.log(y, DagPa, score);
+      return -score;
+    }
+    const Y = d3.range(N).map(i=> [data[i][yColumnIndex]]);
+    const X = d3.range(N).map(i=> data[i].filter((v,j)=>j!=yColumnIndex));
+
+    const linearRegression = (trainIndices) =>{
+      let trainX = new mlMatrix.Matrix(trainIndices.map(i=>X[i]));
+      let trainY = new mlMatrix.Matrix(trainIndices.map(i=>Y[i]));
+      let w = mlMatrix.solve(trainX, trainY, true);
+      let trainPred = trainX.mmul(w);
+      let trainErr = trainY.sub(trainPred);
+      let trainMse = trainErr.transpose().mmul(trainErr).data[0][0] / trainIndices.length;
+      return {w, trainY, trainPred, trainMse};
+    }
+    const valLinearRegression = (trainIndices, valIndices) =>{
+      const {w, trainY, trainPred, trainMse} = linearRegression(trainIndices)
+      let valX = new mlMatrix.Matrix(valIndices.map(i=>X[i]));
+      let valY = new mlMatrix.Matrix(valIndices.map(i=>Y[i]));
+      let valPred = valX.mmul(w);
+      let valErr = valY.sub(valPred);
+      let valMse = valErr.transpose().mmul(valErr).data[0][0] / valIndices.length;
+      return {w, trainY, trainPred, trainMse, valY, valPred, valMse};
+    }
+    
+    // Shuffle:
+    const valBootstrap = d3.range(nSplits).map(()=>{
+      let idx = shuffleArray(d3.range(N));
+      let trainIdx = idx.slice(0, Math.floor(N*0.75));
+      let valIdx = idx.slice(Math.floor(N*0.75), N);
+      return valLinearRegression(trainIdx, valIdx).valMse;
+    })
+    const score = d3.mean(valBootstrap) + 3*Math.sqrt(d3.variance(valBootstrap));
+    console.log(y, DagPa, score, valBootstrap);
+    return -score;
+    
+  }
+
+  _computeLocalScoreOLD(y, DagPa){
+    const {data:fullData, N, nCategories:fullNCategories} = this;
     const {data, nCat, nColumns, nCategories, yColumnIndex} = (()=>{
       // Filter relevant columns
       let columns = [y, ...DagPa];
@@ -766,7 +882,8 @@ class Model{
     
     const score = logLikelihood - 0.5*Math.log(N) * nParams;
     //console.log(y, DagPa, score, logLikelihood);
-    return this._localScore[key] = score;
+
+    return score;
   }
 
 }
@@ -826,8 +943,8 @@ class Test_ContinuousDAG {
   }
 
   static random_weights(n, edges_ij){
-    const edges_ijw = edges_ij.map(([i,j])=>[i, j, randn()]);
-    const nodesNoise = d3.range(n).map(x=> Math.max(Math.abs(randn()),Math.abs(randn())));
+    const edges_ijw = edges_ij.map(([i,j])=>[i, j, (Math.random()>0.5?1:-1)*(1+0.25*randn())]);
+    const nodesNoise = d3.range(n).map(x=> 0.25+Math.abs(0.25*randn()));
     return new Test_ContinuousDAG(n, edges_ijw, nodesNoise);
   }
 
